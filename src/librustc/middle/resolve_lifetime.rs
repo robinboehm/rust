@@ -2149,19 +2149,44 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                 false
             };
 
-            if let hir::TyKind::Rptr(lifetime_ref, ref mt) = inputs[0].node {
-                if let hir::TyKind::Path(hir::QPath::Resolved(None, ref path)) = mt.ty.node {
-                    if is_self_ty(path.res) {
-                        if let Some(&lifetime) = self.map.defs.get(&lifetime_ref.hir_id) {
-                            let scope = Scope::Elision {
-                                elide: Elide::Exact(lifetime),
-                                s: self.scope,
-                            };
-                            self.with(scope, |_, this| this.visit_ty(output));
-                            return;
+            struct SelfVisitor<'a, F: FnMut(Res) -> bool> {
+                is_self_ty: F,
+                map: &'a NamedRegionMap,
+                lifetime: Option<Region>,
+            }
+
+            impl<'a, F: FnMut(Res) -> bool> Visitor<'a> for SelfVisitor<'a, F> {
+                fn nested_visit_map<'this>(&'this mut self) -> NestedVisitorMap<'this, 'a> {
+                    NestedVisitorMap::None
+                }
+
+                fn visit_ty(&mut self, ty: &'a hir::Ty) {
+                    if let hir::TyKind::Rptr(lifetime_ref, ref mt) = ty.node {
+                        if let hir::TyKind::Path(hir::QPath::Resolved(None, ref path)) = mt.ty.node
+                        {
+                            if (self.is_self_ty)(path.res) {
+                                self.lifetime = self.map.defs.get(&lifetime_ref.hir_id).copied();
+                                return;
+                            }
                         }
                     }
+                    intravisit::walk_ty(self, ty)
                 }
+            }
+
+            let mut visitor = SelfVisitor {
+                is_self_ty,
+                map: self.map,
+                lifetime: None,
+            };
+            visitor.visit_ty(&inputs[0]);
+            if let Some(lifetime) = visitor.lifetime {
+                let scope = Scope::Elision {
+                    elide: Elide::Exact(lifetime),
+                    s: self.scope,
+                };
+                self.with(scope, |_, this| this.visit_ty(output));
+                return;
             }
         }
 
