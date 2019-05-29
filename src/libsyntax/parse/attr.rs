@@ -29,6 +29,9 @@ impl<'a> Parser<'a> {
                     let inner_error_reason = if just_parsed_doc_comment {
                         "an inner attribute is not permitted following an outer doc comment"
                     } else if !attrs.is_empty() {
+                        self.diagnostic()
+                            .struct_span_note(self.prev_span, "previous outer attribute")
+                            .emit()
                         "an inner attribute is not permitted following an outer attribute"
                     } else {
                         DEFAULT_UNEXPECTED_INNER_ATTR_ERR_MSG
